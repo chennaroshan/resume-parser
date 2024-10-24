@@ -148,12 +148,6 @@ async def parse_resume(request: Request, file: UploadFile = File(...)):
                                "phone": "",
                                "expected_salary": null
                            },
-                           "socials": {
-                               "github": "",
-                               "linkedin": "",
-                               "twitter": "",
-                               "website": ""
-                           },
                            "courses": [
                                {
                                    "id": "",
