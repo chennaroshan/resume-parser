@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Request
+from fastapi import FastAPI, File, UploadFile, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 from textExtractor import TextExtractor
 from linksExtractor import LinksExtractor
@@ -9,9 +9,16 @@ from dotenv import load_dotenv
 import json
 import tiktoken  # For estimating token usage
 import re #usedd for the link extraction.
+from database.mongodb import get_collection 
+import logging
+from bson import ObjectId  # Import ObjectId from bson
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 text_extractor = TextExtractor()
@@ -19,7 +26,7 @@ text_extractor = TextExtractor()
 # Add the CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -100,9 +107,13 @@ async def extract_links_from_file(file: UploadFile = File(...)):
         github_links = [link for link in extracted_links if "github.com" in link]
 
         # Create a dictionary with the key "linkedin" and the value being the LinkedIn link(s)
-        result = {"linkedin": linkedin_links[0],"github": github_links[0]}
+        result = {}
+        if len(linkedin_links) > 0:
+            result["linkedin"] = linkedin_links[0]
+        if len(github_links) > 0:
+            result["github"] = github_links[0]        
         
-
+        print("extracted_links:", result)
         # Return the dictionary as JSON
         return {"extracted_links": result}
     except Exception as e:
@@ -114,7 +125,29 @@ async def extract_links_from_file(file: UploadFile = File(...)):
 
 # API 2: Upload a file (PDF or DOCX), extract text, and return the parsed resume data with cost
 @app.post("/api/resume/parse-resume")
-async def parse_resume(request: Request, file: UploadFile = File(...)):
+async def parse_resume(request: Request, file: UploadFile = File(...), userId: str = Form(...)):
+    # Log the userId
+    logger.info(f"Received userId: {userId}")
+
+    # Check if the user profile exists in MongoDB
+    collection = await get_collection("userProfiles")  # Using the userProfiles collection
+
+    try:
+        # Convert the user_id string to ObjectId
+        user_object_id = ObjectId(userId)  # Convert user_id to ObjectId
+        # Query by the user field
+        user_profile = await collection.find_one({"user": user_object_id})  
+    except Exception as e:
+        logger.error(f"Error querying user profile: {str(e)}")
+        return {"error": "Failed to query user profile"}
+
+    if user_profile:
+        logger.info(f"User profile found for userId: {userId}")
+        return {"error": "User profile already exists. Resume parsing is not allowed."}
+    else:
+        logger.info(f"No user profile found for userId: {userId}")
+
+    # If no user profile exists, proceed with resume parsing
     extracted_text = await read_file(file)
     
     # Prepare the messages for the ChatCompletion API
@@ -263,5 +296,11 @@ async def parse_resume(request: Request, file: UploadFile = File(...)):
         }
     else:
         return {"error": "OpenAI response was empty"}
+
+@app.post("/api/resume/save")
+async def save_resume(data: dict):
+    collection = await get_collection("resumes")  # Replace with your collection name
+    result = await collection.insert_one(data)
+    return {"inserted_id": str(result.inserted_id)}
 
     
